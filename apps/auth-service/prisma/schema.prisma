@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+//pnpm npx prisma migrate dev --name init
+//pnpm prisma migrate reset
+// pnpm prisma generate
+// pnpm prisma studio
+// pnpm prisma validate
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  OWNER
+  SUPPORT
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+  DELETED
+}
+
+enum RevocationReason {
+  LOGOUT
+  LOGOUT_ALL
+  TOKEN_REUSE
+  PASSWORD_CHANGED
+  ACCOUNT_SUSPENDED
+  SECURITY
+}
+
+model User {
+  id           String @id @default(uuid())
+  email        String @unique
+  passwordHash String
+
+  name String?
+
+  // Profile
+  avatarUrl String?
+  phone     String?
+  timezone  String  @default("UTC")
+
+  // Security
+  role             UserRole   @default(USER)
+  status           UserStatus @default(PENDING_VERIFICATION)
+  emailVerified    Boolean    @default(false)
+  twoFactorEnabled Boolean    @default(false)
+  twoFactorSecret  String?
+
+  // Global token invalidation
+  tokenVersion Int @default(0)
+
+  // Relations
+  sessions     UserSession[]
+  loginHistory LoginHistory[]
+  auditLogs    UserAuditLog[]
+  passwordRestTokens PasswordResetToken[]
+
+  // Account lifecycle
+  lastLoginAt DateTime?
+  deletedAt   DateTime?
+
+  // Restore
+  gracePeriodEnd       DateTime?
+  restoreCodeHash      String?
+  restoreCodeExpiresAt DateTime?
+  restoreCodeUsed      Boolean   @default(true)
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@index([name, email])
+  @@index([role, status])
+  @@map("users")
+}
+
+model UserSession {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Session
+  expiresAt DateTime
+
+  // Device information
+  ipAddress  String?
+  userAgent  String?
+  deviceType String?
+  location   String?
+
+  // Session status
+  isValid       Boolean           @default(true)
+  revokedAt     DateTime?
+  revokedReason RevocationReason?
+
+  // Token family
+  tokenFamily TokenFamily?
+
+  createdAt    DateTime      @default(now())
+  lastUsedAt   DateTime      @default(now())
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+  @@index([isValid, expiresAt])
+  @@index([createdAt])
+  @@map("user_sessions")
+}
+
+model TokenFamily {
+  id String @id @default(uuid())
+
+  sessionId String      @unique
+  session   UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  refreshTokens RefreshToken[]
+
+  revokedAt     DateTime?
+  revokedReason RevocationReason?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("token_families")
+}
+
+model RefreshToken {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String    
+  session   UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  familyId  String
+  family    TokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique
+
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([familyId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
+
+model LoginHistory {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  success Boolean
+  method  String
+
+  ipAddress  String
+  userAgent  String?
+  deviceType String?
+  location   String?
+
+  failureReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([ipAddress])
+  @@index([createdAt])
+  @@map("login_history")
+}
+
+model UserAuditLog {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action      UserAction
+  description String?
+
+  oldValues Json?
+  newValues Json?
+
+  ipAddress String?
+  userAgent String?
+  requestId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@map("user_audit_logs")
+}
+model PasswordResetToken{
+ id String @id @default(uuid()) // ineed to serach about this function cuid()
+ userId String
+ tokenHash String @unique
+ expiresAt DateTime
+ usedAt DateTime?
+ createAt DateTime @default(now())
+ user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+ @@index([userId])
+ @@index([expiresAt])
+}
+
+enum UserAction {
+  PROFILE_UPDATED
+  PASSWORD_CHANGED
+  EMAIL_CHANGED
+  TWO_FACTOR_ENABLED
+  TWO_FACTOR_DISABLED
+  ACCOUNT_SUSPENDED
+  ACCOUNT_DELETED
+  PRIVACY_SETTINGS_CHANGED
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  USER_REGISTERED
+  TOKEN_REFRESHED
+  REFRESH_TOKEN_REUSE
+  USER_LOGOUT
+  RESTORE_REQUESTED
+  ACCOUNT_RESTORED
+  ALL_SESSIONS_REVOKED
+  TOKEN_VERSION_BUMPED
+  EMAIL_VERIFIED
+}

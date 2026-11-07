@@ -1,0 +1,15 @@
+#Depndencies
+**/node_modules
+#Environment Variables And Secret
+.env
+.env.*
+!.env.example
+#Generate Files (Prisma ,Build outputs,etc.)
+src/generated/
+build/
+dist/
+
+#IDE AND Editor Files
+.vscode/
+.idea/
+*.log
