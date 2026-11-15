@@ -147,23 +147,73 @@ export class AuthService{
         }
     }
     //----LOGOUT--------//
-    async logout(sessionId:string, userId:string){
-        const session= await this.sessionrepo.findValidById(sessionId)
-        if(!session || session.userId !==userId){
-            logger.warn({ event: "auth.logout_rejected", reason: "session_invalid", userId, sessionId });
-            throw new Error("Invalid session")
+    
+async logout(sessionId: string, userId: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+        const session = await tx.userSession.findFirst({
+            where: {
+                id: sessionId,
+                userId,
+                isValid: true,
+                expiresAt: { gt: new Date() },
+            },
+        });
+
+        if (!session) {
+            throw new AppError("Invalid session", {
+                statusCode: 401,
+                code: "INVALID_SESSION",
+            });
         }
-      
-        await this.sessionrepo.revoke(sessionId , RevocationReason.LOGOUT)
-        const family = await this.tokenfamily.findBySessionId(sessionId)
-        if(!family){
-            return
+
+        const family = await tx.tokenFamily.findUnique({
+            where: { sessionId },
+        });
+
+        const now = new Date();
+
+        await tx.userSession.update({
+            where: { id: sessionId },
+            data: {
+                isValid: false,
+                revokedAt: now,
+                revokedReason: RevocationReason.LOGOUT,
+            },
+        });
+
+        if (family) {
+            await tx.tokenFamily.updateMany({
+                where: {
+                    id: family.id,
+                    revokedAt: null,
+                },
+                data: {
+                    revokedAt: now,
+                    revokedReason: RevocationReason.LOGOUT,
+                },
+            });
+
+            await tx.refreshToken.updateMany({
+                where: {
+                    familyId: family.id,
+                    revokedAt: null,
+                },
+                data: {
+                    revokedAt: now,
+                },
+            });
         }
-        await this.tokenfamily.revoke(family.id , RevocationReason.LOGOUT)
-        await this.refreshtoken.revokeFamilyTokens(family.id) 
-        logger.info({ event: "auth.logout_succeeded", userId, sessionId });
-        
-    }
+    });
+
+    logger.info({
+        event: "auth.logout_succeeded",
+        userId,
+        sessionId,
+    });
+}
+
+
+
        // ----AUTHENTICATED USER----//
     //  async getAuthenticataeduser(userId:string):Promise<User|null>{
     //     return this.userepo.findById(userId)
@@ -173,88 +223,148 @@ export class AuthService{
     private hashToken(token:string):string{
         return createHash("sha256").update(token).digest("hex")
     }
-    async rotate(refreshToken:string){
-        const payload = this.Tokenservice.verifyRefreshToken(refreshToken)
-        const tokenhash = this.hashToken(refreshToken)
-        const storedToken = await this.refreshtoken.findByTokenHash(tokenhash)
-        console.log("THIS IS WHAT INSIDE THE REFRESH TOKEN :->",storedToken)  // im facing problem in this line witch is null refresh token
-        if(!storedToken){
-            logger.warn({ event: "auth.refresh_rejected", reason: "token_not_found" });
-            throw new Error("Invalid refresh token")
-        }
-       
-        if(
-            storedToken.userId !==payload.sub ||
-            storedToken.sessionId!==payload.sessionId||
-            storedToken.familyId !== payload.familyId
-        ){
-            logger.warn({ event: "auth.refresh_rejected", reason: "token_claim_mismatch" });
-            throw new Error("Invalid refresh token")
-        }
-        if(storedToken.revokedAt){
-            logger.warn({ event: "auth.refresh_rejected", reason: "token_reuse_detected", userId: payload.sub, sessionId: payload.sessionId });
-            await this.tokenfamily.revoke(storedToken.familyId , RevocationReason.TOKEN_REUSE)
-            await this.refreshtoken.revokeFamilyTokens(storedToken!.familyId)
-        }
-        if(storedToken.expiresAt <=new Date() ){
-            logger.warn({ event: "auth.refresh_rejected", reason: "token_expired", userId: payload.sub, sessionId: payload.sessionId });
-            throw new Error("Refresh token is expired or revoked")
-             
-        }
-         const session =
-      await this.sessionrepo.findValidById(
-        payload.sessionId,
-      );
+    
+async rotate(refreshToken: string) {
+    const payload = this.Tokenservice.verifyRefreshToken(refreshToken);
 
-    if (!session || session.userId !== payload.sub) {
-            logger.warn({ event: "auth.refresh_rejected", reason: "session_invalid", userId: payload.sub, sessionId: payload.sessionId });
-      throw new Error("Invalid session");
+    const tokenHash = this.hashToken(refreshToken);
+
+    const storedToken =
+        await this.refreshtoken.findByTokenHash(tokenHash);
+
+    if (!storedToken) {
+        throw new AppError("Invalid refresh token", {
+            statusCode: 401,
+            code: "INVALID_REFRESH_TOKEN",
+        });
     }
 
-    // this the new line iadd it
-      //const updateUser = await this.userepo.incrementTokenVersion(payload.sub)
+    if (
+        storedToken.userId !== payload.sub ||
+        storedToken.sessionId !== payload.sessionId ||
+        storedToken.familyId !== payload.familyId
+    ) {
+        throw new AppError("Invalid refresh token", {
+            statusCode: 401,
+            code: "INVALID_REFRESH_TOKEN",
+        });
+    }
+
+    if (storedToken.revokedAt) {
+        await this.tokenfamily.revoke(
+            storedToken.familyId,
+            RevocationReason.TOKEN_REUSE,
+        );
+
+        await this.refreshtoken.revokeFamilyTokens(
+            storedToken.familyId,
+        );
+
+        throw new AppError("Refresh token reuse detected", {
+            statusCode: 401,
+            code: "REFRESH_TOKEN_REUSE",
+        });
+    }
+
+    if (storedToken.expiresAt <= new Date()) {
+        throw new AppError("Refresh token expired", {
+            statusCode: 401,
+            code: "REFRESH_TOKEN_EXPIRED",
+        });
+    }
+
+    const familyRevoked = await this.tokenfamily.isRevoked(
+        storedToken.familyId,
+    );
+
+    if (familyRevoked) {
+        throw new AppError("Token family revoked", {
+            statusCode: 401,
+            code: "TOKEN_FAMILY_REVOKED",
+        });
+    }
+
+    const session = await this.sessionrepo.findValidById(
+        payload.sessionId,
+    );
+
+    if (
+        !session ||
+        session.userId !== payload.sub ||
+        !session.user ||
+        session.user.status !== "ACTIVE" ||
+        session.user.deletedAt !== null
+    ) {
+        throw new AppError("Invalid session", {
+            statusCode: 401,
+            code: "INVALID_SESSION",
+        });
+    }
 
     const newRefreshToken =
-      this.Tokenservice.generateRefreshToken(
-        payload.sub,
-        payload.sessionId,
-        payload.familyId,
-      );
-   
+        this.Tokenservice.generateRefreshToken(
+            payload.sub,
+            payload.sessionId,
+            payload.familyId,
+        );
 
     const newTokenHash = this.hashToken(newRefreshToken);
 
-    const rotated =
-      await this.refreshtoken.rotate(
-        { // old data
-          id: storedToken.id,
-          familyId: payload.familyId,
+    const rotated = await this.refreshtoken.rotate(
+        {
+            id: storedToken.id,
+            familyId: payload.familyId,
         },
-        { // new data
-          userId: payload.sub,
-          sessionId: payload.sessionId, 
-          familyId: payload.familyId,
-          tokenHash: newTokenHash,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        {
+            userId: payload.sub,
+            sessionId: payload.sessionId,
+            familyId: payload.familyId,
+            tokenHash: newTokenHash,
+            expiresAt: new Date(
+                Date.now() + 7 * 24 * 60 * 60 * 1000,
+            ),
         },
-      );
+    );
 
     if (!rotated) {
-            logger.warn({ event: "auth.refresh_rejected", reason: "token_already_used", userId: payload.sub, sessionId: payload.sessionId });
-      throw new Error("Refresh token has already been used");
-    }
-     const newAcessToken =
-      this.Tokenservice.generateAccessToken(
-        payload.sub,
-        payload.sessionId,
-        session.user.role,
-        session.user.tokenVersion
-        
-      );
+        // A concurrent request may have consumed the same token.
+        await this.tokenfamily.revoke(
+            payload.familyId,
+            RevocationReason.TOKEN_REUSE,
+        );
 
-        logger.info({ event: "auth.refresh_succeeded", userId: payload.sub, sessionId: payload.sessionId });
-    return { refreshToken: newRefreshToken , accessToken:newAcessToken };
-  }
+        await this.refreshtoken.revokeFamilyTokens(
+            payload.familyId,
+        );
+
+        throw new AppError("Refresh token already used", {
+            statusCode: 401,
+            code: "REFRESH_TOKEN_REUSE",
+        });
+    }
+
+    const newAccessToken =
+        this.Tokenservice.generateAccessToken(
+            payload.sub,
+            payload.sessionId,
+            session.user.role,
+            session.user.tokenVersion,
+        );
+
+    logger.info({
+        event: "auth.refresh_succeeded",
+        userId: payload.sub,
+        sessionId: payload.sessionId,
+    });
+
+    return {
+        refreshToken: newRefreshToken,
+        accessToken: newAccessToken,
+    };
+}
+
+
+
 
 // forget and reset password part 
 
@@ -275,40 +385,103 @@ async forgetPassword(email:string):Promise<String>{
         expiresAt:new Date(Date.now() + 15 *60*1000)
     })
     logger.info({ event: "auth.password_reset_requested", userId: user.id });
-    return token // this only work in the develompmet phase when we ganna build the front end we will see
+    console.log("This is the reset token " , token)
+    return "Reset token will send to your email"// this only work in the develompmet phase when we ganna build the front end we will see
 }
 // resetPassword token part
-async resetPassword(token:string , newPassword:string):Promise<void>{
-   try {
-     const tokenHash = createHash("sha256").update(token).digest("hex")
-    const resetToken = await this.passwordReset.findValidByTokenHash(tokenHash)
-    if(!resetToken || resetToken.expiresAt <= new Date()){
-        throw new Error("Invalid or expired password reset token")
-    }
-    await this.db.$transaction(async(tx:Prisma.TransactionClient)=>{
 
-        const consume = await this.passwordReset.consume(resetToken.id , tx)
-        if(!consume){
-            throw new Error("Invalid or expired password reset token")
+async resetPassword(
+    token: string,
+    newPassword: string,
+): Promise<void> {
+    const tokenHash = this.hashToken(token);
+    const resetToken =
+        await this.passwordReset.findValidByTokenHash(tokenHash);
+
+    if (!resetToken) {
+        throw new AppError("Invalid or expired reset token", {
+            statusCode: 400,
+            code: "INVALID_RESET_TOKEN",
+        });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await this.db.$transaction(async (tx) => {
+        const consumed = await this.passwordReset.consume(
+            resetToken.id,
+            tx,
+        );
+
+        if (!consumed) {
+            throw new AppError("Invalid or expired reset token", {
+                statusCode: 400,
+                code: "INVALID_RESET_TOKEN",
+            });
         }
-        const hasedpassword = await bcrypt.hash(newPassword , 10)
+
         await tx.user.update({
-            where:{
-                id:resetToken.userId
+            where: { id: resetToken.userId },
+            data: {
+                passwordHash,
+                tokenVersion: { increment: 1 },
             },
-            data:{
-                passwordHash:hasedpassword,
-                tokenVersion:{increment:1}
-            }
-        })
-    })
-    logger.info({ event: "auth.password_reset_succeeded", userId: resetToken.userId });
-    
-   } catch (error) {
-    console.error("Error in resetPassword transaction:" , error)
-    throw error
-   }
+        });
+
+        await tx.userSession.updateMany({
+            where: {
+                userId: resetToken.userId,
+                isValid: true,
+            },
+            data: {
+                isValid: false,
+                revokedAt: new Date(),
+                revokedReason: RevocationReason.PASSWORD_CHANGED,
+            },
+        });
+
+        const families = await tx.tokenFamily.findMany({
+            where: {
+                session: {
+                    userId: resetToken.userId,
+                },
+                revokedAt: null,
+            },
+            select: { id: true },
+        });
+
+        const familyIds = families.map((family) => family.id);
+
+        if (familyIds.length > 0) {
+            await tx.tokenFamily.updateMany({
+                where: {
+                    id: { in: familyIds },
+                    revokedAt: null,
+                },
+                data: {
+                    revokedAt: new Date(),
+                    revokedReason: RevocationReason.PASSWORD_CHANGED,
+                },
+            });
+
+            await tx.refreshToken.updateMany({
+                where: {
+                    familyId: { in: familyIds },
+                    revokedAt: null,
+                },
+                data: {
+                    revokedAt: new Date(),
+                },
+            });
+        }
+    });
+
+    logger.info({
+        event: "auth.password_reset_succeeded",
+        userId: resetToken.userId,
+    });
 }
+
 async changePassword(userId:string , currentPassword:string , newPassword:string):Promise<void>{
     const user = await this.userepo.findById(userId)
     if(!user){

@@ -41,7 +41,7 @@ export class TokenFamilRepository{
                 revokedAt:true
             }
         })
-        return !family || family.revokedAt!==null  // this make the family does't exisist
+        return !family || family.revokedAt!==null  // this make sure  the family does't exisist
     }
     
 }

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client/extension";
+import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma.js"; // this to avoid the connection pool problem 
 export class PassowrdResetRepo{
      constructor(private db = prisma){}
@@ -27,21 +27,23 @@ export class PassowrdResetRepo{
             }
         })
      }
-     async consume(
-        tokenId:string,
-        tx:Prisma.TransactionClient=this.db // its like an atomic opration either the opration work togerhter or it fall all the opration
-     ){
-       const reuslt = await tx.passwordResetToken.updateMany({
-            where:{
-                id:tokenId,
-               usedAt:null,
-                expiresAt:{gt:new Date()}
+    async consume(
+    tokenId: string,
+    tx: Prisma.TransactionClient
+): Promise<boolean> {
+    const result = await tx.passwordResetToken.updateMany({
+        where: {
+            id: tokenId,
+            usedAt: null,
+            expiresAt: {
+                gt: new Date(),
             },
-            data:{
-                usedAt: new Date()
-            }
-        })
-        return reuslt.count === 1 // that mean its used and incase the user press tow time chose the first one and to avoid the racecondation
+        },
+        data: {
+            usedAt: new Date(),
+        },
+    });
 
-     }
+    return result.count === 1;
+}
 }
