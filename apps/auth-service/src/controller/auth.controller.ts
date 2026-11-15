@@ -37,16 +37,7 @@ export class Authercontroller{
         }
 
     }
-      logout = async(req:Request , res:Response , next:NextFunction)=>{
-        const {sessionId , userId} = req.user
-        if(!sessionId){
-            return res.status(400).json({message:"session ID is required"})
-        }
-            await this.Autherserviceobject.logout(sessionId , userId)
-            return res.status(200).json({
-                message:"Logout scuccessful"
-            })
-        }
+   
     getalluser = async(_req:Request , res:Response)=>{
        try {
          const user= await prisma.user.findFirst({
@@ -118,7 +109,7 @@ export class Authercontroller{
         }
     }
     changePassword = async(req:Request , res:Response , next:NextFunction):Promise<void>=>{
-        const {id:userId}=req.params
+        const userId = req.user?.userId;
         if(!userId || typeof userId !=="string"){
             res.status(401).json({message:"USER ID MUST BE STRING "})
             return
@@ -134,8 +125,13 @@ export class Authercontroller{
     }
 
     getActiveSession = async(req:Request , res:Response)=>{
-        const userId = req.user.id
+        const userId = req.user?.userId
+        if(!userId || typeof userId !=="string"){
+            res.status(401).json({message:"USER ID MUST BE STRING "})
+            return
+        }
         const sessions = await this.Autherserviceobject.getActiveSessions(userId)
+        
         return res.status(200).json({
             success:true,
             message:"Active sessions retrieved successfully",
@@ -143,18 +139,27 @@ export class Authercontroller{
         })
     }
     revokeSession = async(req:Request , res:Response)=>{
-        const userId = req.user.id
+        const userId = req.user?.userId
         const {sessionId} = req.params
-        if(!sessionId || typeof sessionId !=="string"){
+        if(!sessionId ||!userId ||typeof sessionId !=="string" || typeof userId!=="string"){
             res.status(401).json({message:"USER ID MUST BE STRING "})
             return
         }
+        
         const result = await this.Autherserviceobject.revokeSession(sessionId,userId)
         return res.status(200).json({
             succcess:true,
             data:result
         })
     }
-
-   
+    logout = async(req:Request , res:Response , next:NextFunction)=>{
+        const {sessionId , userId} = req.user
+        if(!sessionId){
+            return res.status(400).json({message:"session ID is required"})
+        }
+            await this.Autherserviceobject.logout(sessionId , userId)
+            return res.status(200).json({
+                message:"Logout scuccessful"
+            })
+        }
 }

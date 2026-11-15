@@ -1,3 +1,4 @@
+# docker exec ecommerce-redis redis-cli ping
 services:
   postgres:
     image: postgres:latest
@@ -8,17 +9,23 @@ services:
 
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: Post_123321
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: auth_db
 
     ports:
       - "5432:5432"
-
-#     volumes:
-#       - postgres_data:/var/lib/postgresql/data
+  redis:
+    image: redis:8-alpine
+    container_name: ecommerce-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli" , "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      
 
     
-
-# volumes:
-#   postgres_data:
-#     name: ecommerce-postgres-data

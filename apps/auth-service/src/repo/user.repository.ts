@@ -33,26 +33,26 @@ export class UserRepository{
             }
         })
     }
-
-    async findActiveByEmail(
-        email : string
-    ):Promise<User | null>{
-        return await this.db.user.findFirst({
-            where:{
-                email:email.trim().toLocaleLowerCase(),
-                status:UserStatus.ACTIVE,
-                deletedAt : null
-            }
-        })
-    }
-    async findDeleteEmail(
+    // Ithink we are not ganna need this line so we will move
+    // async findActiveByEmail(
+    //     email : string
+    // ):Promise<User | null>{
+    //     return await this.db.user.findFirst({
+    //         where:{
+    //             email:email.trim().toLocaleLowerCase(),
+    //             status:UserStatus.ACTIVE,
+    //             deletedAt : null
+    //         }
+    //     })
+//}
+    async findDeletedbyEmail(
         email : string
     ):Promise<User | null>{
         return await this.db.user.findFirst({
             where:{
                 email:email.trim().toLocaleLowerCase(),
    
-                status:UserStatus.ACTIVE,
+                status:UserStatus.DELETED,
                 deletedAt : {not:null}
             }
         })
@@ -84,20 +84,21 @@ export class UserRepository{
             }
         })
     }
-    async getTokenVersion(
-        userId : string
-    ):Promise<number | null>{
-        const user = await this.db.user.findUnique({
-            where : {
-                id : userId
-            },
-            select:{
-                tokenVersion : true
-            }
+    // for now ithink were not using this one 
+    // async getTokenVersion(
+    //     userId : string
+    // ):Promise<number | null>{
+    //     const user = await this.db.user.findUnique({
+    //         where : {
+    //             id : userId
+    //         },
+    //         select:{
+    //             tokenVersion : true
+    //         }
 
-            })
-        return user?.tokenVersion ??null
-    }
+    //         })
+    //     return user?.tokenVersion ??null
+    // }
     async softDelete(userId : string , gracePeriodEnd:Date):Promise<User>{
         return await this.db.user.update({
             where:{id : userId},
@@ -115,13 +116,14 @@ export class UserRepository{
             },
             select:{
                 status : true,
+                deletedAt:true,
                 gracePeriodEnd : true
             }
         })
         if(!user || user.status !==UserStatus.DELETED ||!user.gracePeriodEnd){
             return false
         }
-        return new Date<user.gracePeriodEnd
+        return new Date()<user.gracePeriodEnd
     }
     async restoreAccount(
         userId : string,
@@ -136,23 +138,23 @@ export class UserRepository{
                 restoreCodeHash : null,
                 restoreCodeExpiresAt : null,
                 restoreCodeUsed : true,
-               ...(passwordHash!==undefined?{passwordHash} : {})
+               ...(passwordHash!==undefined?{passwordHash} : {}) // if(passwordHash !== undefined){ return passwordHahs}else{return {}}
             }
 
         })
     }
 
-    async findExpiredGracePeriod():Promise<User[]>{
+    async findExpiredGracePeriod():Promise<User[]>{ // we ganna make this one for the background job
         return this.db.user.findMany({
             where:{
                 status : UserStatus.DELETED,
                 gracePeriodEnd:{
-                    lt: new Date()
+                    lte: new Date() // to search the name that period of restore account end
                 }
             }
         })
     }
-    async setResotreCode(data:{
+    async setRestoreCode(data:{
         userId : string,
         codeHash : string,
         expireAt : Date
@@ -171,3 +173,16 @@ export class UserRepository{
     
 
 }
+
+/**
+ * async updatePasswordAndIncrementTokenVersion(userId:string , passwordHash:string , tx:Prisam.TrnascationClient):Promise<User>{
+ * const db = tx ?? this.db  
+ * 
+ * return this.db.user.update({
+ * where:{id:userId},
+ * data:{
+ * passwordHash , tokenVersion:{increment:1}}
+ * }) 
+ * }
+ * 
+ */
