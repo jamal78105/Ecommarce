@@ -11,7 +11,7 @@ import { validation } from "../middleware/middleware.js";
 import { loginSchema, registerSchema } from "../validator/auth.validation.js";
 import { PassowrdResetRepo } from "../repo/PasswordResetrep.js";
 import { authorize } from "../middleware/authroizeation.js";
-import { forgotPassword, resetToken } from "../validator/password-reset.schemas.js";
+import { forgetPasswordSchema , resetPasswordSchema } from "../validator/auth.validation.js";
 const router: Router = Router();
 const authService = new AuthService(
     new UserRepository(),
@@ -28,7 +28,7 @@ router.post("/api/v1/auth/login" ,validation(loginSchema), authcontroller.login)
 router.post("/api/v1/auth/logout",authenticate,authcontroller.logout)
 router.get("/api/v1/auth/get" , authenticate,authorize("USER"),authcontroller.getalluser )
 router.post("/api/v1/auth/refresh" , authcontroller.token)
-router.post("/api/v1/auth/forgetPassowrd" ,validation(forgotPassword), authcontroller.forgetPassowrd)
+router.post("/api/v1/auth/forgetPassowrd" ,validation(forgetPasswordSchema), authcontroller.forgetPassowrd)
 router.post("/api/v1/auth/resetPassowrd" , authcontroller.resetPassowrd)
 router.patch("/api/v1/auth/changepassword/:id" ,authenticate, authcontroller.changePassword)
 router.get("/sessions" , authenticate ,authcontroller.getActiveSession.bind(authcontroller))
