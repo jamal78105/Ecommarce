@@ -1,4 +1,4 @@
-import { UserStatus , User } from "@prisma/client";
+import { UserStatus , User, Prisma } from "@prisma/client";
 import prisma from "../config/prisma.js";
 
 export class UserRepository{
@@ -45,7 +45,7 @@ export class UserRepository{
     //         }
     //     })
 //}
-    async findDeletedbyEmail(
+    async findDeletedByEmail(
         email : string
     ):Promise<User | null>{
         return await this.db.user.findFirst({
@@ -59,7 +59,8 @@ export class UserRepository{
     }
 
     async updateLastLogin(
-        userId : string
+        userId : string,
+        tx?:Prisma.TransactionClient
     ):Promise<User>{
         return await this.db.user.update({
             where:{
@@ -157,7 +158,7 @@ export class UserRepository{
     async setRestoreCode(data:{
         userId : string,
         codeHash : string,
-        expireAt : Date
+        expiresAt : Date
     }):Promise<User>{
         return this.db.user.update({
             where:{
@@ -165,7 +166,7 @@ export class UserRepository{
             },
             data:{
                  restoreCodeHash:data.codeHash,
-                restoreCodeExpiresAt:data.expireAt,
+                restoreCodeExpiresAt:data.expiresAt,
                 restoreCodeUsed : false
             }
         })

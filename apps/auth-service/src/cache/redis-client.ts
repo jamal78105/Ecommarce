@@ -23,7 +23,7 @@ redisClient.on("error" , (error)=>{
 redisClient.on("end" , (error)=>{
     logger.warn({err:error} , "Redis connecting close")
 })
-export async function connectinoRedis():Promise<boolean> {
+export async function connectRedis ():Promise<boolean> {
     if(redisClient.isReady){
         return true
     }

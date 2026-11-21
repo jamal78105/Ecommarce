@@ -8,7 +8,7 @@ import { TokenService } from "../services/token.service.js";
 import { AuthService } from "../services/auth.service.js";
 import { authenticate } from "../middleware/authentication.js";
 import { validation } from "../middleware/middleware.js";
-import { loginSchema, registerSchema } from "../validator/auth.validation.js";
+import { changePasswordSchema, loginSchema, refreshTokenSchema, registerSchema } from "../validator/auth.validation.js";
 import { PassowrdResetRepo } from "../repo/PasswordResetrep.js";
 import { authorize } from "../middleware/authroizeation.js";
 import { forgetPasswordSchema , resetPasswordSchema } from "../validator/auth.validation.js";
@@ -19,7 +19,7 @@ const authService = new AuthService(
     new TokenFamilRepository(),
     new TokenService(),
      new RefreshTokenRepository(),
-     new PassowrdResetRepo
+     new PassowrdResetRepo()
     
 )
 const authcontroller = new Authercontroller(authService)
@@ -29,8 +29,8 @@ router.post("/api/v1/auth/logout",authenticate,authcontroller.logout)
 router.get("/api/v1/auth/get" , authenticate,authorize("USER"),authcontroller.getalluser )
 router.post("/api/v1/auth/refresh" , authcontroller.token)
 router.post("/api/v1/auth/forgetPassowrd" ,validation(forgetPasswordSchema), authcontroller.forgetPassowrd)
-router.post("/api/v1/auth/resetPassowrd" , authcontroller.resetPassowrd)
-router.patch("/api/v1/auth/changepassword/:id" ,authenticate, authcontroller.changePassword)
+router.post("/api/v1/auth/resetPassowrd" ,validation(resetPasswordSchema), authcontroller.resetPassowrd)
+router.patch("/api/v1/auth/changepassword/:id" ,validation(changePasswordSchema),authenticate, authcontroller.changePassword)
 router.get("/sessions" , authenticate ,authcontroller.getActiveSession.bind(authcontroller))
 router.delete("/sessions/:sessionId" , authenticate ,authcontroller.revokeSession.bind(authcontroller))
 

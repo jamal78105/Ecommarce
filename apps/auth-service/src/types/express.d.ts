@@ -1,16 +1,10 @@
 import { UserRole } from "@prisma/client";
+import "express";
 /**
  * Express Request Type Extension
  * Adds the authenticated user payload to the Express Request interface.
  * This is populated by the authenticate middleware after JWT verification.
  */
-export type AuthenticateUser={
-  userId:string,
-  email:string,
-  sessionId:string,
-  tokenVersion:number,
-  role:UserRole
-}
 declare global {
   namespace Express {
     interface Request {
@@ -18,6 +12,13 @@ declare global {
       user?: AuthenticateUser;
     }
   }
+}
+export type AuthenticateUser={
+  userId:string,
+  email:string,
+  sessionId:string,
+  tokenVersion:number,
+  role:UserRole
 }
 
 export {};

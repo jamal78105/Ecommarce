@@ -1,10 +1,12 @@
 import prisma from "../config/prisma.js";
-import { TokenFamily , RevocationReason } from "@prisma/client";
+import { TokenFamily , RevocationReason, Prisma } from "@prisma/client";
 export class TokenFamilRepository{
     constructor(private db = prisma){}
 
-    async create(sessionId : string):Promise<TokenFamily>{
-       return this.db.tokenFamily.create({
+    async create(sessionId : string , tx:Prisma.TransactionClient):Promise<TokenFamily>{
+        const db = tx??this.db
+        
+       return db.tokenFamily.create({
             data:{sessionId}
         })
     }

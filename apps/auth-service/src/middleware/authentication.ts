@@ -75,7 +75,8 @@ if (!authorization?.startsWith("Bearer ")) {
             error instanceof Error &&
             (
                 error.name === "JsonWebTokenError" ||
-                error.name === "TokenExpiredError"
+                error.name === "TokenExpiredError"||
+                error.name === "NotBeforeError"
 
             )
         ) {

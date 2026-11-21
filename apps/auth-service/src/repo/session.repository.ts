@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.js";
-import { LoginHistory, RevocationReason, User, UserSession } from "@prisma/client";
+import { LoginHistory, Prisma, RevocationReason, User, UserSession } from "@prisma/client";
 
 export class SessionRepository{
     // or im ganna use the singleton instance
@@ -12,8 +12,11 @@ export class SessionRepository{
         userAgent?:string,
         deviceType?:string,
         location? : string
-    }):Promise<UserSession>{
-        return this.db.userSession.create({
+    },
+    tx?:Prisma.TransactionClient
+):Promise<UserSession>{
+    const db = tx??this.db
+        return db.userSession.create({
             data:{
                 userId : data.userId,
                 expiresAt : data.expiresAt,
@@ -26,7 +29,7 @@ export class SessionRepository{
     }
     async findValidById(id:string){
         return this.db.userSession.findFirst({
-            where:{id , isValid:true,expiresAt:{gt:new Date()}},
+            where:{id , isValid:true,revokedAt:null,expiresAt:{gt:new Date()}},
             include:{user:true}
         })
     }
@@ -81,8 +84,11 @@ export class SessionRepository{
         deviceType?:string,
         location?:string,
         failureReason?:string
-    }):Promise<LoginHistory>{
-        return this.db.loginHistory.create({data})
+    },
+tx?:Prisma.TransactionClient
+):Promise<LoginHistory>{
+    const db = tx?? this .db
+        return db.loginHistory.create({data})
     }
 
     async findAtiveByuserId(userId:string){
@@ -117,6 +123,7 @@ export class SessionRepository{
                 id:sessionId,
                 userId,
                 isValid:true,
+                revokedAt:null,
                 expiresAt:{
                     gt:new Date()
                 }

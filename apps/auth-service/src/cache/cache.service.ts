@@ -9,7 +9,6 @@ export class CacheService{
         }
         try {
             const CachedData = await redisClient.get(key)
-            console.log("THIS IS THE CACHEDATA BEFORE USING THE PARSING" , CachedData)
             if(CachedData === null){
                 return null
             }
@@ -27,7 +26,7 @@ export class CacheService{
         if(!redisClient.isReady){
             return false
         }
-        if(Number.isInteger(ttlSeconds) || ttlSeconds<=0){
+        if(!Number.isInteger(ttlSeconds) || ttlSeconds<=0){
             throw new AppError("Cache TTl must be a postive integer")
         }
         try {

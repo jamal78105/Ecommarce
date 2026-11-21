@@ -1,7 +1,8 @@
 
 import jwt from "jsonwebtoken";
-import { env } from "../config/env.js";
 import { UserRole } from "@prisma/client";
+import { env } from "../config/env.js";
+import { AppError } from "../utils/apperror.js";
 
 interface AccessTokenPayload {
   sub: string;
@@ -19,7 +20,6 @@ interface RefreshTokenPayload {
 }
 
 export class TokenService {
-  // ACCESS TOKEN
   generateAccessToken(
     userId: string,
     sessionId: string,
@@ -31,17 +31,16 @@ export class TokenService {
         sessionId,
         tokenVersion,
         role,
-        tokenType: "access"
+        tokenType: "access",
       },
       env.JWT_ACCESS_SECRET,
       {
         subject: userId,
-        expiresIn: "15m"
+        expiresIn: "15m",
       }
     );
   }
 
-  // REFRESH TOKEN
   generateRefreshToken(
     userId: string,
     sessionId: string,
@@ -51,50 +50,62 @@ export class TokenService {
       {
         sessionId,
         familyId,
-        tokenType: "refresh"
+        tokenType: "refresh",
       },
       env.JWT_REFRESH_SECRET,
       {
         subject: userId,
-        expiresIn: "7d"
+        expiresIn: "7d",
       }
     );
   }
 
-  // VERIFY ACCESS TOKEN
   verifyAccessToken(token: string): AccessTokenPayload {
-    const decode = jwt.verify(token, env.JWT_ACCESS_SECRET);
+    const decoded = jwt.verify(
+      token,
+      env.JWT_ACCESS_SECRET
+    );
 
     if (
-      typeof decode === "string" ||
-      typeof decode.sub !== "string" ||
-      typeof decode.sessionId !== "string" ||
-      typeof decode.tokenVersion !== "number" ||
-      typeof decode.role !== "string" ||
-      !Object.values(UserRole).includes(decode.role as UserRole) ||
-      decode.tokenType !== "access"
+      typeof decoded === "string" ||
+      typeof decoded.sub !== "string" ||
+      typeof decoded.sessionId !== "string" ||
+      typeof decoded.tokenVersion !== "number" ||
+      typeof decoded.role !== "string" ||
+      !Object.values(UserRole).includes(
+        decoded.role as UserRole
+      ) ||
+      decoded.tokenType !== "access"
     ) {
-      throw new Error("Invalid access token");
+      throw new AppError("Invalid access token", {
+        statusCode: 401,
+        code: "INVALID_ACCESS_TOKEN",
+      });
     }
 
-    return decode as AccessTokenPayload;
+    return decoded as AccessTokenPayload;
   }
 
-  // VERIFY REFRESH TOKEN
   verifyRefreshToken(token: string): RefreshTokenPayload {
-    const decode = jwt.verify(token, env.JWT_REFRESH_SECRET);
+    const decoded = jwt.verify(
+      token,
+      env.JWT_REFRESH_SECRET
+    );
 
     if (
-      typeof decode === "string" ||
-      typeof decode.sub !== "string" ||
-      typeof decode.sessionId !== "string" ||
-      typeof decode.familyId !== "string" ||
-      decode.tokenType !== "refresh"
+      typeof decoded === "string" ||
+      typeof decoded.sub !== "string" ||
+      typeof decoded.sessionId !== "string" ||
+      typeof decoded.familyId !== "string" ||
+      decoded.tokenType !== "refresh"
     ) {
-      throw new Error("Invalid refresh token");
+      throw new AppError("Invalid refresh token", {
+        statusCode: 401,
+        code: "INVALID_REFRESH_TOKEN",
+      });
     }
 
-    return decode as RefreshTokenPayload;
+    return decoded as RefreshTokenPayload;
   }
 }
 

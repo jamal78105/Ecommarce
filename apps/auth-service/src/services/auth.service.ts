@@ -10,6 +10,7 @@ import { PassowrdResetRepo } from "../repo/PasswordResetrep.js";
 import prisma from "../config/prisma.js";
 import { AppError } from "../utils/apperror.js";
 import { logger } from "../config/logger.js";
+import { LoginResponseDto, RegisterResponseDto, toAuthUserRespone } from "../DTO/auth.response.dto.js";
 
 export class AuthService{
     
@@ -28,124 +29,186 @@ export class AuthService{
     ){}
     
     //------------register----------------//
-    async register(data:{
-        email:string ,
-         password:string , 
-         name:string
-    }):Promise<User>{
-        const email = data.email.trim().toLocaleLowerCase()
-        const exsitinguser = await this.userepo.findByEmail(email) // if we forget the await it will say to you this function will always return ture so lets not forget the await key word 
-        if(exsitinguser){
-            logger.warn({ event: "auth.registration_rejected", reason: "email_already_registered" });
-            throw new AppError("User Already exsist with this name " ,{statusCode:404})
-        }
-        const passwordHash = await bcrypt.hash(data.password,12) 
-        const user = await this.userepo.create({
-            email,
-            passwordHash,
-             name:data.name
-        })
-        logger.info({ event: "auth.registered", userId: user.id });
-        return user
-       
-    }
+    
+async register(data: {
+  email: string;
+  password: string;
+  name: string;
+}): Promise<RegisterResponseDto> {
+  const email = data.email.trim().toLowerCase();
+
+  const existingUser = await this.userepo.findByEmail(email);
+
+  if (existingUser) {
+    throw new AppError("Email already registered", {
+      statusCode: 409,
+      code: "EMAIL_ALREADY_EXISTS",
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(data.password, 12);
+
+  const user = await this.userepo.create({
+    email,
+    passwordHash,
+    name: data.name,
+  });
+  
+  logger.info({
+    event: "auth.registered",
+    userId: user.id,
+  });
+  const userDTO = toAuthUserRespone(user)
+  
+
+  return {
+    user: userDTO
+  };
+}
+
+
+
     //----------login-------//
-    async login(data:{
-        email:string,
-        password:string,
-        ipAddress?:string,
-        userAgent?:string,
-        deviceType?:string,
-        location?:string
-    }){
-        const email = data.email.trim().toLowerCase()
-        const user = await this.userepo.findByEmail(email)
-        if(!user){
-            logger.warn({ event: "auth.login_failed", reason: "user_not_found" });
-            throw new Error("INVALID_CREDENTIALS")
-        }
-        const passwordValid = await bcrypt.compare(data.password,user.passwordHash)
-        if(!passwordValid){
-            logger.warn({ event: "auth.login_failed", reason: "invalid_credentials", userId: user.id });
-            await this.sessionrepo.createLoginHisotry({
-                userId:user.id,
-                success:false,
-                method:"password",
-                ipAddress:data.ipAddress??"unknown",
-                userAgent:data.userAgent??"unknown",
-                deviceType:data.deviceType??"unknown",
-                location:data.location??"unknown",
-                failureReason:"INVALID CREDENTIALS"
+    
+async login(data: {
+  email: string;
+  password: string;
+  ipAddress?: string;
+  userAgent?: string;
+  deviceType?: string;
+  location?: string;
+}): Promise<LoginResponseDto> {
+  const email = data.email.trim().toLowerCase();
+  const user = await this.userepo.findByEmail(email);
 
-            })
-            throw new AppError("INVALID_CREDENTIALS")
-        }
-        if(user.status !== "ACTIVE"){
-            logger.warn({ event: "auth.login_failed", reason: "account_inactive", userId: user.id });
-            throw new Error("Account not active")
-        }
-        // ---CREATE SESSION---//
-        const sessionExpire = new Date(Date.now()+7*24*60*60*1000)
-        const sessoin = await this.sessionrepo.create({
-            userId:user.id,
-            expiresAt:sessionExpire,
-            ipAddress:data.ipAddress??"unknown",
-            userAgent:data.userAgent??"unknown",
-            deviceType:data.deviceType??"unknown",
-            location:data.location??"unknown",
-        })
-        //------ CREATE TOKEN FAMILY------//
-        const family = await this.tokenfamily.create(sessoin.id)
+  if (!user) {
+    throw new AppError("Invalid credentials", {
+      statusCode: 401,
+      code: "INVALID_CREDENTIALS",
+    });
+  }
 
-        //----------CRATE ACCESS TOKEN-------//
-        const accesstoken =  this.Tokenservice.generateAccessToken(
-            user.id,
-            sessoin.id,
-            user.role,
-            user.tokenVersion,
-        )
-          
-        //----------CREATE REFRESH TOKEN-------------//
-        const refreshtoken =  this.Tokenservice.generateRefreshToken(
-            user.id,
-            sessoin.id,
-            family.id
-        )
-        //--- Hash the refreshtoken
-        // const refreshTokenHash = await bcrypt.hash(refreshtoken , 10)
-          const refreshTokenHash = createHash("sha256").update(refreshtoken).digest("hex")
-        //--------store refreshtoken--------//
-        const refreshTokenExpiresAt = new Date(
-            Date.now() + 7*24*60*60*1000
-        )
-        await this.refreshtoken.create({
-            userId:user.id,
-            familyId:family.id,
-            expiresAt:refreshTokenExpiresAt,
-            tokenHash : refreshTokenHash,
-            sessionId:sessoin.id
-        })
-        //-----UPDATE LAST LOGIN-----//
-        await this.userepo.updateLastLogin(user.id)
-        // ---LOGIN HISTORY----
-          await this.sessionrepo.createLoginHisotry({
-                userId:user.id,
-                success:true,
-                method:"password",
-                ipAddress:data.ipAddress??"unknown",
-                userAgent:data.userAgent??"unknown",
-                deviceType:data.deviceType??"unknown",
-                location:data.location??"unknown",
+  const passwordValid = await bcrypt.compare(
+    data.password,
+    user.passwordHash
+  );
 
-            })
-        logger.info({ event: "auth.login_succeeded", userId: user.id, sessionId: sessoin.id });
-        return {
-            user, // iwant to stop this to see what will happen {user}
-            accesstoken,
-            refreshtoken,
-            sessionId:sessoin.id
-        }
-    }
+  if (!passwordValid) {
+    await this.sessionrepo.createLoginHisotry({
+      userId: user.id,
+      success: false,
+      method: "password",
+      ipAddress: data.ipAddress ?? "unknown",
+      userAgent: data.userAgent ?? "unknown",
+      deviceType: data.deviceType ?? "unknown",
+      location: data.location ?? "unknown",
+      failureReason: "INVALID_CREDENTIALS",
+    });
+
+    throw new AppError("Invalid credentials", {
+      statusCode: 401,
+      code: "INVALID_CREDENTIALS",
+    });
+  }
+
+  if (
+    user.status !== "ACTIVE" ||
+    user.deletedAt !== null
+  ) {
+    throw new AppError("Account is not active", {
+      statusCode: 403,
+      code: "ACCOUNT_NOT_ACTIVE",
+    });
+  }
+
+  const sessionExpiresAt = new Date(
+    Date.now() + 7 * 24 * 60 * 60 * 1000
+  );
+
+  // We generate the actual tokens after the session is created.
+  const result = await this.db.$transaction(async (tx) => {
+    const session = await this.sessionrepo.create(
+      {
+        userId: user.id,
+        expiresAt: sessionExpiresAt,
+        ipAddress: data.ipAddress ?? "unknown",
+        userAgent: data.userAgent ?? "unknown",
+        deviceType: data.deviceType ?? "unknown",
+        location: data.location ?? "unknown",
+      },
+      tx
+    );
+
+    const family = await this.tokenfamily.create(
+      session.id,
+      tx
+    );
+
+    const accessToken = this.Tokenservice.generateAccessToken(
+      user.id,
+      session.id,
+      user.role,
+      user.tokenVersion
+    );
+
+    const refreshToken = this.Tokenservice.generateRefreshToken(
+      user.id,
+      session.id,
+      family.id
+    );
+
+    const refreshTokenHash = this.hashToken(refreshToken);
+
+    await this.refreshtoken.create(
+      {
+        userId: user.id,
+        sessionId: session.id,
+        familyId: family.id,
+        tokenHash: refreshTokenHash,
+        expiresAt: sessionExpiresAt,
+         tx
+      },
+     
+    );
+
+    await this.userepo.updateLastLogin(user.id, tx);
+
+    await this.sessionrepo.createLoginHisotry(
+      {
+        userId: user.id,
+        success: true,
+        method: "password",
+        ipAddress: data.ipAddress ?? "unknown",
+        userAgent: data.userAgent ?? "unknown",
+        deviceType: data.deviceType ?? "unknown",
+        location: data.location ?? "unknown",
+      },
+      tx
+    );
+
+    return {
+      sessionId: session.id,
+      accessToken,
+      refreshToken,
+    };
+  });
+
+  logger.info({
+    event: "auth.login_succeeded",
+    userId: user.id,
+    sessionId: result.sessionId,
+  });
+
+  return {
+    user: toAuthUserRespone(user),
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    sessionId: result.sessionId,
+  };
+}
+
+
+
     //----LOGOUT--------//
     
 async logout(sessionId: string, userId: string): Promise<void> {
@@ -154,6 +217,7 @@ async logout(sessionId: string, userId: string): Promise<void> {
             where: {
                 id: sessionId,
                 userId,
+                revokedAt:null,
                 isValid: true,
                 expiresAt: { gt: new Date() },
             },
@@ -258,6 +322,7 @@ async rotate(refreshToken: string) {
 
         await this.refreshtoken.revokeFamilyTokens(
             storedToken.familyId,
+            RevocationReason.TOKEN_REUSE
         );
 
         throw new AppError("Refresh token reuse detected", {
@@ -335,6 +400,7 @@ async rotate(refreshToken: string) {
 
         await this.refreshtoken.revokeFamilyTokens(
             payload.familyId,
+            RevocationReason.TOKEN_REUSE
         );
 
         throw new AppError("Refresh token already used", {
@@ -499,15 +565,63 @@ async changePassword(userId:string , currentPassword:string , newPassword:string
     }
 
     const hashPassword = await bcrypt.hash(newPassword , 10)
-        await this.db.user.update({
-            where:{id:userId},
-            data:{
-             passwordHash:hashPassword,
-             tokenVersion:{
-                increment:1
-             }
-            }
-        })
+       await this.db.$transaction(async (tx) => {
+    const now = new Date();
+
+    await tx.user.update({
+        where: { id: userId },
+        data: {
+            passwordHash: hashPassword,
+            tokenVersion: { increment: 1 },
+        },
+    });
+
+    const sessions = await tx.userSession.findMany({
+        where: { userId },
+        select: { id: true },
+    });
+
+    const sessionIds = sessions.map((session) => session.id);
+
+    if (sessionIds.length === 0) {
+        return;
+    }
+
+    await tx.userSession.updateMany({
+        where: {
+            id: { in: sessionIds },
+            isValid: true,
+        },
+        data: {
+            isValid: false,
+            revokedAt: now,
+            revokedReason: RevocationReason.PASSWORD_CHANGED,
+        },
+    });
+
+    await tx.tokenFamily.updateMany({
+        where: {
+            sessionId: { in: sessionIds },
+            revokedAt: null,
+        },
+        data: {
+            revokedAt: now,
+            revokedReason: RevocationReason.PASSWORD_CHANGED,
+        },
+    });
+
+    await tx.refreshToken.updateMany({
+        where: {
+            sessionId: { in: sessionIds },
+            revokedAt: null,
+        },
+        data: {
+            revokedAt: now,
+        },
+    });
+});
+
+
     logger.info({ event: "auth.password_changed", userId });
 }
 async getActiveSessions(userId:string){

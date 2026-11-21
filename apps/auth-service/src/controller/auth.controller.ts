@@ -1,7 +1,6 @@
 import { Request , Response , NextFunction } from "express";
 import { AuthService } from "../services/auth.service.js";
 import prisma from "../config/prisma.js";
-import { success } from "zod";
 import { logger } from "../config/logger.js";
 export class Authercontroller{
     constructor(
@@ -15,11 +14,10 @@ export class Authercontroller{
         //console.log(user)
             return res.status(201).json({
             message:"User registered successfully",
-            data:user // this might show the user unnessary data we ganna use DTO
+            data:user 
         })
         } catch (error) {
             next(error)
-            console.log("SOMETING WENT WRONG WITH THE SERVER : ", error)
         }
        
     }
@@ -63,15 +61,9 @@ export class Authercontroller{
        }
     }
 
-    token = async(req:Request , res:Response)=>{
+    token = async(req:Request , res:Response , next:NextFunction)=>{
       try {
           const {refresToken} = req.body
-
-        if(typeof refresToken !== "string" || !refresToken.trim()){
-            return res.status(400).json({
-                message:"Refresh token is required"
-            })
-        }
         const result = await this.Autherserviceobject.rotate(refresToken)
         return res.status(200).json({
             message:"Token refreshed successfully",
@@ -82,8 +74,10 @@ export class Authercontroller{
         })
       } catch (error:any) {
                 logger.warn({ event: "auth.refresh_failed", method: req.method, path: req.path });
+                 next(error)
         return res.status(401).json({
-            message:error.message || "INVALID OR EXPIRD REFRESH TOKEN"
+            message:error.message || "INVALID OR EXPIRD REFRESH TOKEN",
+            
         })
       }
     }
@@ -153,6 +147,9 @@ export class Authercontroller{
         })
     }
     logout = async(req:Request , res:Response , next:NextFunction)=>{
+        if(!req.user){
+            return res.status(401).json({message:"Unauthorize"})
+        }
         const {sessionId , userId} = req.user
         if(!sessionId){
             return res.status(400).json({message:"session ID is required"})
